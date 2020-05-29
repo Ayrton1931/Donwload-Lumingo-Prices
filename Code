@@ -1,0 +1,202 @@
+"""
+Created on Wed Feb 26 23:01:35 2020
+
+@author: Shadow
+"""
+### Packages
+
+from selenium import webdriver
+from bs4 import BeautifulSoup
+import pandas as pd
+import requests
+import urllib
+import re
+import time
+def newMatrix(f,c,n):
+    matriz=[]
+    for i in range(f):
+        a=[n]*c
+        matriz.append(a)
+    return matriz
+    
+### Define options of webdriver   
+chrome_options = webdriver.ChromeOptions()
+chrome_options.add_argument('--headless')
+chrome_options.add_argument('--no-sandbox')
+chrome_options.add_argument('--disable-dev-shm-usage')
+driver = webdriver.Chrome('chromedriver',options=chrome_options) ### Define webdriver
+driver.get("https://www.lumingo.com")                            ### get inside webpage.
+
+
+#### Define function of scroll.
+def scroll(driver, timeout):
+    scroll_pause_time = timeout
+    # Get scroll height
+    last_height = driver.execute_script("return document.body.scrollHeight")
+    while True:
+        # Scroll down to bottom
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        # Wait to load page
+        time.sleep(scroll_pause_time)
+        # Calculate new scroll height and compare with last scroll height
+        new_height = driver.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            # If heights are the same it will exit the function
+            break
+        last_height = new_height
+
+
+### Get categories of virtual store.
+"""Categorias
+"""
+url_tienda= r'https://www.lumingo.com'    ###Definition of URL
+driver.get(url_tienda)
+content=driver.page_source                ### Get HTML code
+soup = BeautifulSoup(content)             ### To beutifulsoup element
+Supra_Categoria=soup.find_all('ul', class_='nav__links nav__links--products js-offcanvas-links') ### Select information location on html code
+Supra_Categoria=Supra_Categoria[0].find_all('span', class_='yCmsComponent nav__link js_nav__link atm-menu-principal')
+url_list=[]                               #### Store URLs of categories.
+for categoria in Supra_Categoria:
+    categ=categoria.find_all('a')
+    url_categoria= r'https://www.lumingo.com/' + categ[0].get('href')
+    url_list.append(url_categoria)
+    
+### From URL categories obtein URL products.
+List_urls_products=[]
+for cat in url_list:
+    start_time=time.time()
+    driver.get(cat)
+    scroll(driver, 1)
+    content=driver.page_source
+    soup = BeautifulSoup(content)
+    urls_pages=soup.find_all('div', class_='product--list--row--container')
+    urls_pages_elements=urls_pages[0].find_all('a', class_='product-card')
+    for elements in urls_pages_elements:
+        url_product= r'https://www.lumingo.com' + elements.get('href')
+        List_urls_products.append(url_product)
+    print('-------- %s seconds --------' %(time.time() - start_time))
+
+### Get detail information of product: price, size, weihgt, model, brand, and vendor. 
+List_products = []
+List_time_context_product = []
+for url_product in range (0, len(List_urls_products)):
+    start_time = time.time()
+    url_element = r'https://www.lumingo.com/'+List_urls_products[url_product]
+    soup=BeautifulSoup( requests.get(url_element).content )
+    ###How detect "agotados"
+    ###How dectect 'Error 404'
+    Not_found = soup.find_all('div', class_='not--found--page')
+    if len(Not_found)!=0:
+        print('Error 404.')
+    ##nombre, precio original, descuento, y mega_descuento;  
+    ##Marca, caracteristicas, categoria, codigo ID, vendedor
+    ##Categoria y nombre 
+    else:
+        Pre_categoria=soup.find_all('ol', class_='breadcrumb')
+        Pre_categoria=Pre_categoria[0].text.strip()
+        Pre_categoria=Pre_categoria.split('\n')
+        categorias_list=[]
+        for pseudo_categories in Pre_categoria:
+            if not pseudo_categories=='':
+                categorias_list.append(pseudo_categories)
+        for cate_element in range(0, len(categorias_list)-1):
+            if cate_element==0:
+                Categoria=categorias_list[cate_element]
+            else:
+                Categoria= Categoria + ' | ' + categorias_list[cate_element]
+        product_name = categorias_list[ len(categorias_list)-1 ] 
+
+        ###Precios
+        ### There are descounts in all products?
+        soupPrecios=soup.find_all('div', class_='product-details')
+        pre_desc_price=soupPrecios[0].find_all('div', class_='price')
+
+        if len(pre_desc_price)==1:
+            precio_descuento=pre_desc_price[0].text.strip()
+            precio_descuento=precio_descuento.replace('S/', '')
+            precio_descuento=float(precio_descuento.replace(',', ''))    
+        else:
+            precio_descuento=0
+        pre_orig_price = soupPrecios[0].find_all('div', class_='price--line--through')
+        if len(pre_orig_price)==0:
+            precio_orig=precio_descuento
+        else:
+            for pulguita in pre_orig_price:
+                price_orig=pulguita.find_all('span')
+                price_orig=price_orig[0].text.strip()
+                if price_orig=='':
+                    price_orig=precio_descuento
+                else:
+                    price_orig=price_orig.replace('S/', '')
+                    price_orig=float(price_orig.replace(',',''))
+
+        ###Caracteristicas
+        pre_catarecteris = soup.find_all('div', class_='dropdown--body tabespecificaciones')
+        if len(pre_catarecteris)==0:
+            brand='-'
+            altura='-'
+            ancho='-'
+            profundo='-'
+            modelo='-'
+            peso='-'
+        else:
+            pre_catarecteris=pre_catarecteris[0].find_all( 'div' ,class_='classification')      
+            for element_categ in pre_catarecteris:
+                each_categ=element_categ.text.strip()
+                if re.search(r'Marca', each_categ):
+                    brand= each_categ.replace('\xa0', '')
+                    brand=brand.replace('\n', '')
+                    brand=brand.replace('\t', '')
+                if re.search(r'Alto', each_categ):
+                    altura=each_categ.replace('\xa0', '')
+                    altura=altura.replace('\n', '')
+                    altura=altura.replace('\t', '')
+                if re.search(r'Ancho', each_categ):
+                    ancho=each_categ.replace('\xa0', '')
+                    ancho=ancho.replace('\n', '')
+                    ancho=ancho.replace('\t', '')
+                if re.search(r'Largo', each_categ):
+                    profundidad=each_categ.replace('\xa0', '')
+                    profundidad = profundidad.replace('\n', '')
+                    profundidad = profundidad.replace('\t', '')
+                if re.search(r'Modelo:', each_categ):
+                    modelo=each_categ.replace('\xa0', '')
+                    modelo=modelo.replace('\n', '')
+                    modelo=modelo.replace('\t', '')
+                if re.search(r'Peso', each_categ):
+                    peso = each_categ.replace('\xa0','')
+                    peso=peso.replace('\n', '')
+                    peso=peso.replace('\t', '')
+                
+        code_Id=soup.find_all('div', class_='page-title')
+        codigo = code_Id[0].text.strip()
+        codigo=codigo.split('  ')
+        codigo=codigo[0].replace('\n', ' ')
+        codigo=codigo.replace('\t', ' ')
+        codigo=codigo.split('  ')
+        for code in codigo:
+            if re.search(r'Código:', code):
+                Codigo_id = code
+
+        Vendor= soup.find_all('div',class_='tienda--name')
+        if len(Vendor)==0:
+            vendor='-'
+            vendor_url='-'
+        else:
+            vendor=Vendor[0].text.strip()
+            HREF=Vendor[0].find_all('a')
+            vendor_url = r'https://www.lumingo.com'+ HREF[0].get('href')
+
+
+
+        Caracteristicas = [product_name, precio_descuento, price_orig, url_element, Categoria, brand, modelo, altura,\
+                           ancho, profundidad, peso, Codigo_id, vendor, vendor_url]
+        tiempo_exe=time.time() - start_time
+        #print(Caracteristicas)
+        
+        donwload_ratio = url_product/len(List_urls_products)
+        print('Donwloading........ %s' %donwload_ratio)
+        print('-------- %s seconds---------' % tiempo_exe)
+        List_products.append(Caracteristicas)
+        List_time_context_product.append(tiempo_exe)
+
